@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GHV - Consumos Diarios</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f4f8; color: #1a202c; }
+  
+  header { background: #2d6a4f; color: white; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .subtitle { font-size: 12px; opacity: 0.8; margin-top: 2px; }
+  .update-badge { background: rgba(255,255,255,0.2); border-radius: 20px; padding: 4px 10px; font-size: 11px; }
+
+  .filters { background: white; padding: 12px 16px; display: flex; gap: 10px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; }
+  .filter-btn { border: 1px solid #cbd5e0; background: white; border-radius: 20px; padding: 6px 14px; font-size: 12px; cursor: pointer; white-space: nowrap; color: #4a5568; }
+  .filter-btn.active { background: #2d6a4f; color: white; border-color: #2d6a4f; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 14px; }
+  .kpi-card { background: white; border-radius: 10px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .kpi-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi-value { font-size: 22px; font-weight: 700; color: #2d6a4f; margin: 4px 0 2px; }
+  .kpi-sub { font-size: 11px; color: #a0aec0; }
+
+  .section { background: white; margin: 0 14px 14px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+  .section-header { padding: 14px 16px 10px; font-size: 13px; font-weight: 600; color: #2d3748; border-bottom: 1px solid #f7fafc; }
+  .chart-wrap { padding: 14px; }
+
+  .finca-list { padding: 0 16px 14px; }
+  .finca-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f7fafc; }
+  .finca-row:last-child { border-bottom: none; }
+  .finca-name { font-size: 13px; font-weight: 500; }
+  .finca-bar-wrap { flex: 1; margin: 0 12px; height: 6px; background: #edf2f7; border-radius: 3px; }
+  .finca-bar { height: 6px; background: #2d6a4f; border-radius: 3px; }
+  .finca-val { font-size: 12px; font-weight: 600; color: #2d6a4f; min-width: 70px; text-align: right; }
+
+  .cat-list { padding: 0 16px 14px; }
+  .cat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f7fafc; font-size: 12px; }
+  .cat-row:last-child { border-bottom: none; }
+  .cat-name { color: #4a5568; flex: 1; }
+  .cat-val { font-weight: 600; color: #2d3748; }
+
+  .loading { text-align: center; padding: 40px 20px; color: #718096; font-size: 14px; }
+  .error-msg { background: #fff5f5; color: #c53030; padding: 12px 16px; margin: 14px; border-radius: 8px; font-size: 13px; border: 1px solid #fed7d7; }
+
+  .mes-selector { padding: 10px 14px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; gap: 8px; overflow-x: auto; }
+  .mes-btn { border: 1px solid #cbd5e0; background: white; border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; white-space: nowrap; color: #4a5568; }
+  .mes-btn.active { background: #e6f4ef; color: #2d6a4f; border-color: #2d6a4f; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🌿 GHV Consumos</h1>
+    <div class="subtitle">Reporte diario automatizado</div>
+  </div>
+  <div class="update-badge" id="updateBadge">Cargando...</div>
+</header>
+
+<div id="app">
+  <div class="loading">⏳ Cargando datos...</div>
+</div>
+
+<script>
+const GITHUB_USER = 'letort002';
+const GITHUB_REPO = 'ghv-consumos-2';
+const DATA_FILE = 'consumos_data.json';
+
+const FINCA_COLORS = { 'HV': '#2d6a4f', 'FM': '#52b788', 'JG': '#74c69d', 'CM': '#b7e4c7' };
+const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+
+let allData = [];
+let filteredData = [];
+let activeFinca = 'TODAS';
+let activeMes = 'TODOS';
+
+async function loadData() {
+  try {
+    const url = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/${DATA_FILE}?t=${Date.now()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('No se encontró el archivo de datos');
+    const json = await res.json();
+    allData = json.rows || [];
+    document.getElementById('updateBadge').textContent = `📅 ${json.fecha_actualizacion || 'Hoy'}`;
+    render();
+  } catch(e) {
+    document.getElementById('app').innerHTML = `<div class="error-msg">⚠️ ${e.message}<br><small>Asegúrate de que el script haya subido datos a GitHub</small></div>`;
+  }
+}
+
+function getFincaShort(bodega) {
+  if (bodega.includes('HV')) return 'HV';
+  if (bodega.includes('FM')) return 'FM';
+  if (bodega.includes('JG')) return 'JG';
+  if (bodega.includes('CM')) return 'CM';
+  return bodega;
+}
+
+function applyFilters() {
+  filteredData = allData.filter(r => {
+    const f = activeFinca === 'TODAS' || getFincaShort(r.BODEGA) === activeFinca;
+    const m = activeMes === 'TODOS' || r.MES === activeMes;
+    return f && m;
+  });
+}
+
+function fmt(n) {
+  return '$' + Number(n).toLocaleString('es-EC', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+function render() {
+  applyFilters();
+
+  // KPIs
+  const totalGasto = filteredData.reduce((s, r) => s + (Number(r.TOTAL) || 0), 0);
+  const totalFilas = filteredData.length;
+  const htaPromedio = filteredData.length ? filteredData.reduce((s,r) => s + (Number(r['$ X HTA']) || 0), 0) / filteredData.length : 0;
+  const categorias = [...new Set(filteredData.map(r => r['CATEGORÍA']))].length;
+
+  // Por finca
+  const porFinca = {};
+  filteredData.forEach(r => {
+    const f = getFincaShort(r.BODEGA);
+    porFinca[f] = (porFinca[f] || 0) + (Number(r.TOTAL) || 0);
+  });
+  const maxFinca = Math.max(...Object.values(porFinca), 1);
+
+  // Por categoría (top 8)
+  const porCat = {};
+  filteredData.forEach(r => {
+    const c = r['CATEGORÍA'] || 'SIN CATEGORÍA';
+    porCat[c] = (porCat[c] || 0) + (Number(r.TOTAL) || 0);
+  });
+  const topCats = Object.entries(porCat).sort((a,b) => b[1]-a[1]).slice(0, 8);
+
+  // Por mes (para el gráfico)
+  const porMes = {};
+  MESES.forEach(m => porMes[m] = 0);
+  allData.filter(r => activeFinca === 'TODAS' || getFincaShort(r.BODEGA) === activeFinca)
+    .forEach(r => { if (r.MES && porMes[r.MES] !== undefined) porMes[r.MES] += (Number(r.TOTAL) || 0); });
+  const mesesConData = MESES.filter(m => porMes[m] > 0);
+
+  // Meses disponibles
+  const mesesDisponibles = [...new Set(allData.map(r => r.MES))].filter(Boolean)
+    .sort((a,b) => MESES.indexOf(a) - MESES.indexOf(b));
+
+  document.getElementById('app').innerHTML = `
+    <div class="filters">
+      ${['TODAS','HV','FM','JG','CM'].map(f => `
+        <button class="filter-btn ${activeFinca===f?'active':''}" onclick="setFinca('${f}')">${f==='TODAS'?'🌿 Todas las fincas':f}</button>
+      `).join('')}
+    </div>
+
+    <div class="mes-selector">
+      <button class="mes-btn ${activeMes==='TODOS'?'active':''}" onclick="setMes('TODOS')">Año completo</button>
+      ${mesesDisponibles.map(m => `
+        <button class="mes-btn ${activeMes===m?'active':''}" onclick="setMes('${m}')">${m.charAt(0)+m.slice(1).toLowerCase()}</button>
+      `).join('')}
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Gasto Total</div>
+        <div class="kpi-value">${fmt(totalGasto)}</div>
+        <div class="kpi-sub">${totalFilas.toLocaleString()} movimientos</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">$ / HTA promedio</div>
+        <div class="kpi-value">${fmt(htaPromedio)}</div>
+        <div class="kpi-sub">${categorias} categorías</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">💰 Gasto por Finca</div>
+      <div class="finca-list">
+        ${Object.entries(porFinca).sort((a,b)=>b[1]-a[1]).map(([f, v]) => `
+          <div class="finca-row">
+            <div class="finca-name">${f}</div>
+            <div class="finca-bar-wrap"><div class="finca-bar" style="width:${(v/maxFinca*100).toFixed(0)}%; background:${FINCA_COLORS[f]||'#2d6a4f'}"></div></div>
+            <div class="finca-val">${fmt(v)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">📈 Tendencia Mensual</div>
+      <div class="chart-wrap">
+        <canvas id="chartMes" height="180"></canvas>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">📦 Top Categorías</div>
+      <div class="cat-list">
+        ${topCats.map(([c,v]) => `
+          <div class="cat-row">
+            <div class="cat-name">${c}</div>
+            <div class="cat-val">${fmt(v)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  // Chart
+  const ctx = document.getElementById('chartMes').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: mesesConData.map(m => m.charAt(0) + m.slice(1,3).toLowerCase()),
+      datasets: [{
+        data: mesesConData.map(m => porMes[m]),
+        backgroundColor: '#2d6a4f',
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '$' + (v/1000).toFixed(0)+'K', font: { size: 10 } }, grid: { color: '#f0f4f8' } },
+        x: { ticks: { font: { size: 10 } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function setFinca(f) { activeFinca = f; render(); }
+function setMes(m) { activeMes = m; render(); }
+
+loadData();
+</script>
+</body>
+</html>
